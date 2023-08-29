@@ -6,7 +6,7 @@ use url::Url;
 use regex::Regex;
 //use std::fs;
 use std::fs::File;
-use std::io::prelude::*;
+use std::io::{prelude::*, BufReader};
 
 mod logg;
 use logg::ColorLogger;
@@ -62,48 +62,14 @@ fn analyse_urls(urls: Vec<&str>) -> Vec<String> {
     Ok(())
 }
 
-static LOGGER: ColorLogger = ColorLogger;
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    log::set_logger(&LOGGER).unwrap();
-    log::set_max_level(log::LevelFilter::Info);
-    log::info!("Init the logger");
-    let matches = Command::new("RetroHistory")
-        .arg(
-            Arg::new("url")
-                .short('u')
-                .long("url")
-                .value_name("URL")
-                .required(true)
-                .help("The target you need to find"),
-        )
-        .arg(
-            Arg::new("proxy")
-                .short('p')
-                .long("proxy")
-                .value_name("PROXY")
-                .required(false)
-                .help("The address of proxy"),
-        )
-        .get_matches();
-
-    let url = matches.get_one::<String>("url").unwrap();
-
+fn single_wayback(url:&str,client:Client)-> Result<(), Box<dyn std::error::Error>>{
     let domain = url_to_domain(url);
     let _wayback_uri = format!(
         "https://web.archive.org/cdx/search/cdx?url={}/*&output=txt&collapse=urlkey&fl=original&page=/",
         domain,
     );
     log::info!("Prepare to request {}",_wayback_uri);
-    let proxy = matches.contains_id("proxy");
-
-    let client = if proxy {
-        let proxy_scheme = matches.get_one::<String>("proxy").unwrap();
-        let proxy = Proxy::all(proxy_scheme)?;
-        Client::builder().proxy(proxy).build()?
-    } else {
-        Client::new()
-    };
+    
     let body = client
         .get(_wayback_uri)
         .header(header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36")
@@ -121,8 +87,66 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     log::info!("The data size:{}",number);
     let filename=generate_filename(&domain, "Fuzz");
     let _=write_data_to_file(filter_urls, filename);
-    // for url in filter_urls {
-    //     println!("{}", url);
-    // }
+    Ok(())
+}
+
+static LOGGER: ColorLogger = ColorLogger;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    log::set_logger(&LOGGER).unwrap();
+    log::set_max_level(log::LevelFilter::Info);
+    log::info!("Init the logger");
+    let matches = Command::new("RetroHistory")
+        .arg(
+            Arg::new("url")
+                .short('u')
+                .long("url")
+                .value_name("URL")
+                .required(false)
+                .help("The target you need to find"),
+        )
+        .arg(
+            Arg::new("proxy")
+                .short('p')
+                .long("proxy")
+                .value_name("PROXY")
+                .required(false)
+                .help("The address of proxy"),
+        )
+        .arg(
+            Arg::new("list")
+            .short('l')
+            .long("list")
+            .value_name("LIST")
+            .required(false)
+            .help("The address of list to scan"),
+        )
+        .get_matches();
+    let proxy = matches.contains_id("proxy");
+
+    let client = if proxy {
+        let proxy_scheme = matches.get_one::<String>("proxy").unwrap();
+        let proxy = Proxy::all(proxy_scheme)?;
+        Client::builder().proxy(proxy).build()?
+    } else {
+        Client::new()
+    };
+    if matches.contains_id("url"){
+        let url = matches.get_one::<String>("url").unwrap();
+        single_wayback(url, client)?;
+    }
+    else if matches.contains_id("list") {
+        let targets_filename=matches.get_one::<String>("list").unwrap();
+        let file=File::open(targets_filename).expect("Failed to open");
+        let reader=BufReader::new(file);
+        for line in reader.lines(){
+            if let Ok(line)=line{
+                single_wayback(&line, client.clone())?;
+            }
+        }
+        
+    }
+   
+   
     Ok(())
 }
